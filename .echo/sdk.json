@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "echo-webhook-router",
+  "capabilities": [],
+  "note": "No SDK namespace collision. echo_search_caps queried for 'webhook router inbound' (0 matches) and 'echo.webhook' (15 matches, all under echo.webhookrelay.* -- a DIFFERENT, architecturally distinct service: fanout/subscriber-management, its own live FORGE deployment, deferred separately in this campaign as a dual-runtime case). This repo's own job (inbound multi-source webhook verification + routing to internal Worker bindings) has no existing echo.webhookrouter.* namespace to claim or reconcile against.",
+  "entrypoints": ["scripts/certforge_journey.py"],
+  "data_classification": "restricted",
+  "network": "none"
+}
