@@ -191,6 +191,21 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+function timingSafeEqual(a: string | undefined | null, b: string | undefined | null): boolean {
+  if (!a || !b) return false;
+  const enc = new TextEncoder();
+  const bufA = enc.encode(a);
+  const bufB = enc.encode(b);
+  const len = Math.max(bufA.length, bufB.length, 1);
+  const padA = new Uint8Array(len);
+  const padB = new Uint8Array(len);
+  padA.set(bufA);
+  padB.set(bufB);
+  let diff = bufA.length ^ bufB.length;
+  for (let i = 0; i < len; i++) diff |= padA[i] ^ padB[i];
+  return diff === 0;
+}
+
 function generateId(): string {
   return `wh_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -221,7 +236,7 @@ async function hmacSha1(key: string, data: string): Promise<string> {
 async function verifyGitHub(body: string, signature: string | null, secret: string): Promise<boolean> {
   if (!signature) return false;
   const expected = 'sha256=' + await hmacSha256(secret, body);
-  return expected === signature;
+  return timingSafeEqual(expected, signature);
 }
 
 async function verifyStripe(body: string, sigHeader: string | null, secret: string): Promise<boolean> {
@@ -242,7 +257,7 @@ async function verifyStripe(body: string, sigHeader: string | null, secret: stri
 
   const payload = `${timestamp}.${body}`;
   const expected = await hmacSha256(secret, payload);
-  return expected === sig;
+  return timingSafeEqual(expected, sig);
 }
 
 async function verifySlack(body: string, timestamp: string | null, signature: string | null, secret: string): Promise<boolean> {
@@ -252,23 +267,23 @@ async function verifySlack(body: string, timestamp: string | null, signature: st
 
   const baseString = `v0:${timestamp}:${body}`;
   const expected = 'v0=' + await hmacSha256(secret, baseString);
-  return expected === signature;
+  return timingSafeEqual(expected, signature);
 }
 
 function verifyTelegram(secretToken: string | null, expected: string): boolean {
-  return secretToken === expected;
+  return timingSafeEqual(secretToken, expected);
 }
 
 async function verifyMeta(body: string, signature: string | null, secret: string): Promise<boolean> {
   if (!signature) return false;
   const expected = 'sha256=' + await hmacSha256(secret, body);
-  return expected === signature;
+  return timingSafeEqual(expected, signature);
 }
 
 async function verifyVercel(body: string, signature: string | null, secret: string): Promise<boolean> {
   if (!signature) return false;
   const expected = await hmacSha1(secret, body);
-  return expected === signature;
+  return timingSafeEqual(expected, signature);
 }
 
 async function verifyWebhook(source: string, request: Request, body: string, env: Env): Promise<boolean> {
@@ -619,11 +634,18 @@ async function handleWebhook(
   const verified = await verifyWebhook(source, request, body, env);
   if (!verified) {
     log('warn', 'Signature verification failed', { source, channel, webhookId, ip });
-    // Log but don't reject — some sources don't have secrets configured yet
-    // Only reject for sources where we HAVE the secret
+    // Log but don't reject — some sources don't have secrets configured yet.
+    // Only reject for sources where we HAVE the secret configured (every
+    // source with a configurable secret, not just github/stripe/slack --
+    // telegram/whatsapp/messenger/vercel were verified above but never
+    // actually enforced here, so a configured secret for those sources was
+    // silently ignored on failure and a forged webhook still got routed).
     const hasSecret = (source === 'github' && env.GITHUB_WEBHOOK_SECRET)
       || (source === 'stripe' && env.STRIPE_WEBHOOK_SECRET)
-      || (source === 'slack' && env.SLACK_SIGNING_SECRET);
+      || (source === 'slack' && env.SLACK_SIGNING_SECRET)
+      || (source === 'telegram' && env.TELEGRAM_WEBHOOK_SECRET)
+      || ((source === 'whatsapp' || source === 'messenger') && env.META_APP_SECRET)
+      || (source === 'vercel' && env.VERCEL_WEBHOOK_SECRET);
     if (hasSecret) {
       return json({ error: 'Invalid signature' }, 401);
     }
@@ -765,7 +787,7 @@ function handleVerificationChallenge(request: Request, source: string, env: Env)
       const mode = params.get('hub.mode');
       const token = params.get('hub.verify_token');
       const challenge = params.get('hub.challenge');
-      if (mode === 'subscribe' && token === env.WHATSAPP_VERIFY_TOKEN) {
+      if (mode === 'subscribe' && timingSafeEqual(token, env.WHATSAPP_VERIFY_TOKEN)) {
         return new Response(challenge, { status: 200 });
       }
       return new Response('Forbidden', { status: 403 });
@@ -918,7 +940,7 @@ if (path === '/health') {
 
   // Auth for management endpoints
   const apiKey = request.headers.get('X-Echo-API-Key');
-  if (apiKey !== env.ECHO_API_KEY) {
+  if (!timingSafeEqual(apiKey, env.ECHO_API_KEY)) {
     return json({ error: 'Unauthorized' }, 401);
   }
 

@@ -2,9 +2,11 @@
   "name": "echo-webhook-router",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
-    "dev": "wrangler dev"
+    "dev": "wrangler dev",
+    "test": "tsc --noEmit && node --test tests/*.test.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241230.0",
